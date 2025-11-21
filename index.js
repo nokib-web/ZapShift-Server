@@ -5,6 +5,11 @@ require('dotenv').config()
 const app = express()
 const stripe = require('stripe')(process.env.STRIPE_SECRET);
 const crypto = require("crypto");
+const admin = require("firebase-admin");
+
+ const serviceAccount = require("./zapshift-firebase-adminsdk.json");
+
+
 
 
 const port = process.env.PORT || 3000
@@ -19,6 +24,25 @@ function generateTrackingId() {
 // middleware
 app.use(express.json());
 app.use(cors())
+
+const verifyFBToken = async(req, res, next)=>{
+    // console.log("headers in the middleware",req.headers.authorization)
+    const token = req.headers.authorization;
+    if(!token){
+        return res.status(401).send({message: 'unauthorized access'})
+    }
+    try{
+        const idToken = token.split(' ')[1];
+        const decoded = await admin.auth().verifyIdToken(idToken)
+        console.log('decoded dta',decoded)
+    }
+    catch(err){
+
+    }
+
+
+    next()
+}
 
 const uri = process.env.MongoDB_URI;
 
@@ -87,9 +111,20 @@ async function run() {
             res.send(result);
         });
 
-        app.get('/payments', async (req, res) => {
-            const payments = await paymentCollection.find({}).toArray();
-            res.send(payments);
+
+        // Payments Related api
+        app.get('/payments', verifyFBToken, async (req, res) => {
+            const email = req.query.email;
+            const query = {}
+
+            // console.log(req.headers)
+
+            if (email) {
+                query.customerEmail = email
+            }
+            const cursor = paymentCollection.find(query)
+            const result = await cursor.toArray();
+            res.send(result);
         });
 
 
@@ -170,6 +205,20 @@ async function run() {
         app.patch('/payment-success', async (req, res) => {
             const sessionId = req.query.session_id;
             const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+            const transactionId = session.payment_intent;
+            const query = { transactionId: transactionId }
+
+            const paymentExist = await paymentCollection.findOne(query);
+            console.log(paymentExist)
+            if (paymentExist) {
+                return res.send({
+                    message: 'already exist',
+                    transactionId,
+                    trackingId: paymentExist.trackingId
+                })
+            }
+
             const trackingId = generateTrackingId()
             console.log('session', session)
             if (session.payment_status === 'paid') {
@@ -193,7 +242,9 @@ async function run() {
                     parcelName: session.metadata.parcelName,
                     transactionId: session.payment_intent,
                     paymentStatus: session.payment_status,
-                    paidAt: new Date()
+                    paidAt: new Date(),
+                    trackingId: trackingId,
+
 
 
 
