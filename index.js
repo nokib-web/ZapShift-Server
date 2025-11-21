@@ -87,6 +87,11 @@ async function run() {
             res.send(result);
         });
 
+        app.get('/payments', async (req, res) => {
+            const payments = await paymentCollection.find({}).toArray();
+            res.send(payments);
+        });
+
 
 
         // payment related api
@@ -165,6 +170,7 @@ async function run() {
         app.patch('/payment-success', async (req, res) => {
             const sessionId = req.query.session_id;
             const session = await stripe.checkout.sessions.retrieve(sessionId);
+            const trackingId = generateTrackingId()
             console.log('session', session)
             if (session.payment_status === 'paid') {
                 const id = session.metadata.parcelId;
@@ -172,9 +178,9 @@ async function run() {
                 const update = {
                     $set: {
                         paymentStatus: 'paid',
-                        trackingId:generateTrackingId(),
+                        trackingId: trackingId,
                     }
-                    
+
                 }
                 console.log('generated', generateTrackingId())
                 const result = await parcelsCollection.updateOne(query, update);
@@ -182,24 +188,31 @@ async function run() {
                 const payment = {
                     amount: session.amount_total / 100,
                     currency: session.currency,
-                    customerEmail : session.customer_email,
+                    customerEmail: session.customer_email,
                     parcelId: session.metadata.parcel,
-                    parcelName :session.metadata.parcelName,
-                    transactionId : session.payment_intent,
+                    parcelName: session.metadata.parcelName,
+                    transactionId: session.payment_intent,
                     paymentStatus: session.payment_status,
-                    paidAt : new Date()
-                    
+                    paidAt: new Date()
+
 
 
                 }
 
-                if(session.payment_status==='paid'){
-                    const resultPayment= await paymentCollection.insertOne(payment)
-                    res.send({success:true, modifyParcel:result, paymentInfo: resultPayment})
+                if (session.payment_status === 'paid') {
+                    const resultPayment = await paymentCollection.insertOne(payment)
+                    return res.send({
+                        success: true,
+                        modifyParcel: result,
+                        paymentInfo: resultPayment,
+                        transactionId: session.payment_intent,
+                        trackingId: trackingId
+                    })
                 }
-               
+
             }
-            res.send({ success: false })
+            return res.send({ success: false })
+
         })
 
 
