@@ -48,6 +48,8 @@ const verifyFBToken = async (req, res, next) => {
     next()
 }
 
+
+
 const uri = process.env.MongoDB_URI;
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
@@ -75,7 +77,39 @@ async function run() {
         const parcelsCollection = db.collection("parcels");
         const paymentCollection = db.collection('payments');
 
+        // Middleware with database access
+        // must be after firebase verify
+        const verifyAdmin = async( req, res, next)=>{
+            const email = req.decoded_email;
+            const query = {email}
+            const user = await userCollection.findOne(query)
+
+            if(!user|| user.role!=='admin'){
+                return req.status(403).json({message: 'Forbidden Access'});
+
+                
+            }
+            next();
+        }
+
         // Users related api
+
+        app.get('/users', verifyFBToken, async (req, res) => {
+            const cursor = userCollection.find();
+            const result = await cursor.toArray()
+            res.json(result)
+        })
+
+        app.get('/users/:id', async (req, res) => {
+
+        })
+
+        app.get('/users/:email/role', async (req, res) => {
+            const email = req.params.email;
+            const query = { email }
+            const user = await userCollection.findOne(query);
+            res.json({ role: user?.role || 'user' })
+        })
 
         app.post('/users', async (req, res) => {
             const user = req.body;
@@ -89,6 +123,19 @@ async function run() {
             }
             const result = await userCollection.insertOne(user);
             res.json(result); // json => send
+        })
+
+        app.patch('/users/:id/role', verifyFBToken, verifyAdmin, async (req, res) => {
+            const id = req.params.id;
+            const roleInfo = req.body;
+            const query = { _id: new ObjectId(id) }
+            const updateDoc = {
+                $set: {
+                    role: roleInfo.role
+                }
+            }
+            const result = await userCollection.updateOne(query, updateDoc)
+            res.json(result)
         })
 
         // Riders related api
@@ -152,7 +199,7 @@ async function run() {
 
         // Delete a Rider application 
         // DELETE a rider by ID
-        app.delete("/riders/:id", verifyFBToken, async (req, res) => {
+        app.delete("/riders/:id", verifyFBToken,verifyAdmin, async (req, res) => {
             try {
                 const id = req.params.id;
 
